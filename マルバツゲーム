@@ -1,0 +1,596 @@
+import React, { useState, useEffect } from 'react';
+
+export default function TicTacToeGame() {
+  const [board, setBoard] = useState(Array(9).fill(null));
+  const [moveNumbers, setMoveNumbers] = useState(Array(9).fill(null));
+  const [currentPlayer, setCurrentPlayer] = useState('O');
+  const [moveCountO, setMoveCountO] = useState(0);
+  const [moveCountX, setMoveCountX] = useState(0);
+  const [winner, setWinner] = useState(null);
+  const [history, setHistory] = useState([]);
+  const [roomId, setRoomId] = useState('');
+  const [connectedRoom, setConnectedRoom] = useState(null);
+  const [onlineMode, setOnlineMode] = useState(false);
+  const [playerSymbol, setPlayerSymbol] = useState(null);
+  const [showRules, setShowRules] = useState(false);
+
+  useEffect(() => {
+    if (onlineMode && connectedRoom) {
+      loadGameState();
+      const interval = setInterval(loadGameState, 2000);
+      return () => clearInterval(interval);
+    }
+  }, [onlineMode, connectedRoom]);
+
+  const loadGameState = async () => {
+    try {
+      const state = await window.storage.get(`game:${connectedRoom}`, true);
+      if (state && state.value) {
+        const gameState = JSON.parse(state.value);
+        setBoard(gameState.board);
+        setMoveNumbers(gameState.moveNumbers);
+        setCurrentPlayer(gameState.currentPlayer);
+        setMoveCountO(gameState.moveCountO);
+        setMoveCountX(gameState.moveCountX);
+        setWinner(gameState.winner);
+        setHistory(gameState.history);
+      }
+    } catch (error) {
+      console.log('ゲーム状態の読み込み中...');
+    }
+  };
+
+  const saveGameState = async () => {
+    if (!connectedRoom) return;
+    
+    const gameState = {
+      board,
+      moveNumbers,
+      currentPlayer,
+      moveCountO,
+      moveCountX,
+      winner,
+      history,
+      lastUpdate: Date.now()
+    };
+
+    try {
+      await window.storage.set(`game:${connectedRoom}`, JSON.stringify(gameState), true);
+    } catch (error) {
+      console.error('保存エラー:', error);
+    }
+  };
+
+  useEffect(() => {
+    if (onlineMode && connectedRoom) {
+      saveGameState();
+    }
+  }, [board, moveNumbers, currentPlayer, moveCountO, moveCountX, winner, history]);
+
+  const checkWinner = (squares) => {
+    const lines = [
+      [0, 1, 2], [3, 4, 5], [6, 7, 8],
+      [0, 3, 6], [1, 4, 7], [2, 5, 8],
+      [0, 4, 8], [2, 4, 6]
+    ];
+
+    for (let line of lines) {
+      const [a, b, c] = line;
+      if (squares[a] && squares[a] === squares[b] && squares[a] === squares[c]) {
+        return squares[a];
+      }
+    }
+    return null;
+  };
+
+  const handleClick = (index) => {
+    if (board[index] || winner) return;
+    if (onlineMode && playerSymbol && currentPlayer !== playerSymbol) return;
+
+    const newBoard = [...board];
+    const newMoveNumbers = [...moveNumbers];
+    
+    // 現在のプレイヤーの手数をカウント
+    const isO = currentPlayer === 'O';
+    const prevCount = isO ? moveCountO : moveCountX;
+    const currentMoveCount = prevCount + 1;
+    
+    // 番号は1, 2, 3のサイクルで回す
+    const displayNumber = ((currentMoveCount - 1) % 3) + 1;
+
+    // 同じプレイヤーの同じ番号の古い手を先に削除
+    if (currentMoveCount > 3) {
+      for (let i = 0; i < newMoveNumbers.length; i++) {
+        if (newMoveNumbers[i] && 
+            newMoveNumbers[i].player === currentPlayer && 
+            newMoveNumbers[i].number === displayNumber) {
+          newBoard[i] = null;
+          newMoveNumbers[i] = null;
+          break;
+        }
+      }
+    }
+
+    // 新しい手を配置
+    newBoard[index] = currentPlayer;
+    newMoveNumbers[index] = { player: currentPlayer, number: displayNumber };
+
+    const winnerPlayer = checkWinner(newBoard);
+    
+    const row = Math.floor(index / 3) + 1;
+    const col = (index % 3) + 1;
+    const newHistory = [...history, `${currentPlayer}: (${col}, ${row}) - 番号${displayNumber}`];
+
+    // すべての状態を更新
+    setBoard(newBoard);
+    setMoveNumbers(newMoveNumbers);
+    setWinner(winnerPlayer);
+    setHistory(newHistory);
+    
+    // カウントの更新
+    if (isO) {
+      setMoveCountO(currentMoveCount);
+    } else {
+      setMoveCountX(currentMoveCount);
+    }
+    
+    // 最後にプレイヤーを切り替え
+    setCurrentPlayer(currentPlayer === 'O' ? 'X' : 'O');
+  };
+
+  const resetGame = () => {
+    setBoard(Array(9).fill(null));
+    setMoveNumbers(Array(9).fill(null));
+    setCurrentPlayer('O');
+    setMoveCountO(0);
+    setMoveCountX(0);
+    setWinner(null);
+    setHistory([]);
+  };
+
+  const createRoom = async () => {
+    const newRoomId = Math.random().toString(36).substring(2, 8).toUpperCase();
+    setConnectedRoom(newRoomId);
+    setOnlineMode(true);
+    setPlayerSymbol('O');
+    resetGame();
+  };
+
+  const joinRoom = async () => {
+    if (!roomId.trim()) {
+      alert('ルームIDを入力してください');
+      return;
+    }
+    setConnectedRoom(roomId.toUpperCase());
+    setOnlineMode(true);
+    setPlayerSymbol('X');
+  };
+
+  const leaveRoom = () => {
+    setConnectedRoom(null);
+    setOnlineMode(false);
+    setPlayerSymbol(null);
+    setRoomId('');
+    resetGame();
+  };
+
+  // 次に置く番号を計算
+  const getNextNumber = (player) => {
+    const count = player === 'O' ? moveCountO : moveCountX;
+    return ((count) % 3) + 1;
+  };
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-6 relative overflow-hidden">
+      {/* モダンな背景 */}
+      <div className="fixed inset-0 bg-gradient-to-br from-indigo-950 via-purple-900 to-pink-900"></div>
+      
+      {/* アニメーション付き背景要素 */}
+      <div className="fixed inset-0 overflow-hidden pointer-events-none">
+        <div className="absolute top-20 left-20 w-96 h-96 bg-purple-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob"></div>
+        <div className="absolute top-40 right-20 w-96 h-96 bg-pink-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-2000"></div>
+        <div className="absolute -bottom-20 left-40 w-96 h-96 bg-indigo-500 rounded-full mix-blend-multiply filter blur-3xl opacity-20 animate-blob animation-delay-4000"></div>
+      </div>
+
+      {/* グリッドパターン */}
+      <div className="fixed inset-0 bg-grid-pattern opacity-10 pointer-events-none"></div>
+
+      <div className="relative z-10 max-w-4xl w-full">
+        {/* ヘッダー */}
+        <div className="text-center mb-8 animate-fade-in">
+          <h1 className="text-6xl font-black mb-3 bg-gradient-to-r from-purple-400 via-pink-400 to-indigo-400 text-transparent bg-clip-text animate-gradient">
+            マルバツゲーム
+          </h1>
+          <p className="text-purple-300 text-lg font-medium">3つ並べて勝利を掴め！</p>
+          <button 
+            onClick={() => setShowRules(!showRules)}
+            className="mt-4 text-pink-400 hover:text-pink-300 transition-colors underline"
+          >
+            📖 ルールを見る
+          </button>
+        </div>
+
+        {/* ルール説明モーダル */}
+        {showRules && (
+          <div className="glass-panel mb-6 animate-slide-up">
+            <div className="flex justify-between items-start mb-4">
+              <h2 className="text-2xl font-bold text-pink-300">📖 ゲームのルール</h2>
+              <button 
+                onClick={() => setShowRules(false)}
+                className="text-purple-300 hover:text-pink-300 text-2xl"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="text-purple-200 space-y-3 text-left">
+              <p><strong className="text-pink-300">🎯 勝利条件:</strong> 縦・横・斜めのいずれかに自分のマークを3つ並べる</p>
+              
+              <p><strong className="text-pink-300">🔢 番号システム:</strong></p>
+              <ul className="list-disc list-inside ml-4 space-y-1">
+                <li>マルを置くたびに、右下に小さく番号（1、2、3）が表示されます</li>
+                <li>番号は 1 → 2 → 3 → 1 → 2 → 3... と繰り返します</li>
+                <li>4手目を置くと、最初に置いた「1」が消えて、新しい場所に「1」が置かれます</li>
+                <li>マル(O)とバツ(X)はそれぞれ独立して番号が進みます</li>
+              </ul>
+
+              <p><strong className="text-pink-300">📍 座標表示:</strong></p>
+              <ul className="list-disc list-inside ml-4 space-y-1">
+                <li>ボードの上と右に座標番号（1、2、3）が表示されています</li>
+                <li>履歴で「(列, 行)」の形式で記録されます</li>
+              </ul>
+
+              <p><strong className="text-pink-300">🌐 オンライン対戦:</strong></p>
+              <ul className="list-disc list-inside ml-4 space-y-1">
+                <li>「ルームを作成」でゲームルームを作り、IDを相手に共有</li>
+                <li>相手は「ルームIDを入力」して「参加」ボタンで参戦</li>
+                <li>リアルタイムで対戦できます</li>
+              </ul>
+            </div>
+          </div>
+        )}
+
+        {/* ゲーム情報 */}
+        <div className="glass-panel mb-6 animate-slide-up" style={{animationDelay: '0.1s'}}>
+          <div className="text-center">
+            <div className="text-2xl font-bold mb-3">
+              {winner ? (
+                <span className="text-yellow-300 animate-pulse-glow">
+                  🏆 勝者: {winner}
+                </span>
+              ) : (
+                <span>
+                  現在のプレイヤー: <span className="text-purple-300">{currentPlayer}</span>
+                  <span className="text-lg text-pink-400 ml-1">{getNextNumber(currentPlayer)}</span>
+                </span>
+              )}
+            </div>
+            <div className="text-purple-200">
+              番号は1→2→3→1と繰り返します (古い番号が消えて新しい場所に置かれます)
+            </div>
+            {onlineMode && (
+              <div className="mt-3 text-pink-300 font-semibold">
+                あなた: {playerSymbol} | ルーム: {connectedRoom}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ゲームボード */}
+        <div className="flex justify-center mb-8 animate-slide-up" style={{animationDelay: '0.2s'}}>
+          <div className="relative inline-block">
+            {/* 座標ラベル（上） */}
+            <div className="absolute -top-10 left-0 right-0 flex justify-around px-2">
+              {[1, 2, 3].map(num => (
+                <div key={num} className="w-24 text-center text-pink-400 font-bold text-lg">
+                  {num}
+                </div>
+              ))}
+            </div>
+
+            {/* 座標ラベル（右） */}
+            <div className="absolute -right-10 top-0 bottom-0 flex flex-col justify-around py-2">
+              {[1, 2, 3].map(num => (
+                <div key={num} className="h-24 flex items-center text-pink-400 font-bold text-lg">
+                  {num}
+                </div>
+              ))}
+            </div>
+
+            {/* ボード */}
+            <div className="glass-panel p-4">
+              <div className="grid grid-cols-3 gap-3">
+                {board.map((cell, index) => {
+                  const moveInfo = moveNumbers[index];
+                  const isDisabled = cell !== null || winner !== null || (onlineMode && playerSymbol && currentPlayer !== playerSymbol);
+                  return (
+                    <button
+                      key={index}
+                      onClick={() => handleClick(index)}
+                      disabled={isDisabled}
+                      className="cell-button group"
+                      style={{animationDelay: `${index * 0.05}s`}}
+                    >
+                      {cell !== null && (
+                        <span className="text-5xl font-black text-purple-300 drop-shadow-glow animate-scale-in">
+                          {cell}
+                        </span>
+                      )}
+                      {moveInfo && moveInfo.number && (
+                        <span className="absolute bottom-2 right-3 text-sm font-bold text-pink-400">
+                          {moveInfo.number}
+                        </span>
+                      )}
+                      <div className="absolute inset-0 bg-gradient-to-br from-purple-500/0 to-pink-500/0 group-hover:from-purple-500/20 group-hover:to-pink-500/20 rounded-xl transition-all duration-300"></div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* コントロール */}
+        <div className="flex justify-center mb-6 animate-slide-up" style={{animationDelay: '0.3s'}}>
+          <button onClick={resetGame} className="modern-button">
+            🔄 リセット
+          </button>
+        </div>
+
+        {/* オンライン対戦セクション */}
+        <div className="glass-panel animate-slide-up" style={{animationDelay: '0.4s'}}>
+          <h2 className="text-2xl font-bold mb-4 text-pink-300">🌐 オンライン対戦</h2>
+          {!onlineMode ? (
+            <div className="space-y-4">
+              <button onClick={createRoom} className="modern-button w-full">
+                ルームを作成
+              </button>
+              <div className="flex gap-3">
+                <input
+                  type="text"
+                  placeholder="ルームIDを入力"
+                  value={roomId}
+                  onChange={(e) => setRoomId(e.target.value)}
+                  className="glass-input flex-1"
+                />
+                <button onClick={joinRoom} className="modern-button">
+                  参加
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="glass-panel bg-purple-500/10 mb-4">
+                <div className="text-center">
+                  <div className="text-sm text-purple-200 mb-1">ルームID</div>
+                  <div className="text-2xl font-black text-pink-300">{connectedRoom}</div>
+                  <div className="text-sm text-purple-300 mt-2">このIDを相手に共有してください</div>
+                </div>
+              </div>
+              <button onClick={leaveRoom} className="modern-button w-full bg-red-500/20 hover:bg-red-500/30">
+                退出
+              </button>
+            </div>
+          )}
+        </div>
+
+        {/* 履歴 */}
+        {history.length > 0 && (
+          <div className="glass-panel mt-6 animate-slide-up" style={{animationDelay: '0.5s'}}>
+            <h3 className="font-bold text-purple-300 mb-3">📜 履歴</h3>
+            <div className="max-h-48 overflow-y-auto space-y-1 custom-scrollbar">
+              {history.map((move, index) => (
+                <div key={index} className="text-purple-200 text-sm">
+                  • {move}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* 勝利バナー */}
+        {winner && (
+          <div className="fixed inset-0 flex items-center justify-center z-50 animate-fade-in pointer-events-none">
+            <div className="glass-panel p-12 text-center transform scale-110 animate-bounce-in pointer-events-auto">
+              <div className="text-6xl mb-4">🎉</div>
+              <div className="text-5xl font-black bg-gradient-to-r from-yellow-300 via-pink-300 to-purple-300 text-transparent bg-clip-text">
+                {winner} の勝利！
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+
+      <style jsx>{`
+        @keyframes blob {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          33% { transform: translate(30px, -50px) scale(1.1); }
+          66% { transform: translate(-20px, 20px) scale(0.9); }
+        }
+
+        @keyframes gradient {
+          0%, 100% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+        }
+
+        @keyframes fade-in {
+          from { opacity: 0; transform: translateY(-20px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes slide-up {
+          from { opacity: 0; transform: translateY(30px); }
+          to { opacity: 1; transform: translateY(0); }
+        }
+
+        @keyframes scale-in {
+          from { transform: scale(0); }
+          to { transform: scale(1); }
+        }
+
+        @keyframes pulse-glow {
+          0%, 100% { text-shadow: 0 0 20px rgba(253, 224, 71, 0.8); }
+          50% { text-shadow: 0 0 40px rgba(253, 224, 71, 1); }
+        }
+
+        @keyframes bounce-in {
+          0% { transform: scale(0) rotate(-180deg); }
+          60% { transform: scale(1.2) rotate(10deg); }
+          100% { transform: scale(1) rotate(0); }
+        }
+
+        .animate-blob {
+          animation: blob 7s infinite;
+        }
+
+        .animation-delay-2000 {
+          animation-delay: 2s;
+        }
+
+        .animation-delay-4000 {
+          animation-delay: 4s;
+        }
+
+        .animate-gradient {
+          background-size: 200% 200%;
+          animation: gradient 3s ease infinite;
+        }
+
+        .animate-fade-in {
+          animation: fade-in 0.6s ease-out;
+        }
+
+        .animate-slide-up {
+          animation: slide-up 0.6s ease-out;
+          animation-fill-mode: both;
+        }
+
+        .animate-scale-in {
+          animation: scale-in 0.3s ease-out;
+        }
+
+        .animate-pulse-glow {
+          animation: pulse-glow 2s ease-in-out infinite;
+        }
+
+        .animate-bounce-in {
+          animation: bounce-in 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+        }
+
+        .bg-grid-pattern {
+          background-image: 
+            linear-gradient(rgba(167, 139, 250, 0.1) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(167, 139, 250, 0.1) 1px, transparent 1px);
+          background-size: 40px 40px;
+        }
+
+        .glass-panel {
+          background: rgba(255, 255, 255, 0.05);
+          backdrop-filter: blur(20px);
+          border-radius: 24px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          padding: 2rem;
+          box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+        }
+
+        .cell-button {
+          position: relative;
+          width: 96px;
+          height: 96px;
+          background: rgba(255, 255, 255, 0.05);
+          backdrop-filter: blur(10px);
+          border: 2px solid rgba(167, 139, 250, 0.3);
+          border-radius: 16px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+          animation: scale-in 0.3s ease-out;
+          animation-fill-mode: both;
+        }
+
+        .cell-button:hover:not(:disabled) {
+          transform: scale(1.05);
+          border-color: rgba(236, 72, 153, 0.6);
+          background: rgba(255, 255, 255, 0.1);
+          box-shadow: 0 0 30px rgba(236, 72, 153, 0.3);
+        }
+
+        .cell-button:disabled {
+          cursor: default;
+          opacity: 1;
+        }
+
+        .cell-button:disabled:not(:has(span)) {
+          cursor: not-allowed;
+        }
+
+        .drop-shadow-glow {
+          filter: drop-shadow(0 0 10px rgba(216, 180, 254, 0.6));
+        }
+
+        .modern-button {
+          background: linear-gradient(135deg, rgba(168, 85, 247, 0.4), rgba(236, 72, 153, 0.4));
+          backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          padding: 12px 32px;
+          border-radius: 12px;
+          color: white;
+          font-weight: 600;
+          cursor: pointer;
+          transition: all 0.3s ease;
+          font-size: 16px;
+        }
+
+        .modern-button:hover {
+          transform: translateY(-2px);
+          box-shadow: 0 10px 25px rgba(168, 85, 247, 0.4);
+          background: linear-gradient(135deg, rgba(168, 85, 247, 0.6), rgba(236, 72, 153, 0.6));
+        }
+
+        .modern-button:active {
+          transform: translateY(0);
+        }
+
+        .glass-input {
+          background: rgba(255, 255, 255, 0.05);
+          backdrop-filter: blur(10px);
+          border: 1px solid rgba(255, 255, 255, 0.2);
+          border-radius: 12px;
+          padding: 12px 16px;
+          color: white;
+          font-size: 16px;
+          outline: none;
+          transition: all 0.3s ease;
+        }
+
+        .glass-input::placeholder {
+          color: rgba(216, 180, 254, 0.5);
+        }
+
+        .glass-input:focus {
+          border-color: rgba(236, 72, 153, 0.5);
+          box-shadow: 0 0 20px rgba(236, 72, 153, 0.2);
+        }
+
+        .custom-scrollbar::-webkit-scrollbar {
+          width: 8px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-track {
+          background: rgba(255, 255, 255, 0.05);
+          border-radius: 4px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+          background: rgba(168, 85, 247, 0.5);
+          border-radius: 4px;
+        }
+
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+          background: rgba(168, 85, 247, 0.7);
+        }
+      `}</style>
+    </div>
+  );
+}
